@@ -609,17 +609,18 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
     return (
       <div className="relative w-full h-full overflow-hidden bg-slate-950 touch-none select-none">
         {/* WebGL water simulation canvas */}
-        <canvas
-          ref={canvasRef}
-          id="webgl-pond-canvas"
-          className="absolute inset-0 w-full h-full block cursor-crosshair"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          aria-label="Lago interativo — toque para criar ondas"
-          role="img"
-        />
+<canvas
+            ref={canvasRef}
+            id="webgl-pond-canvas"
+            className="absolute inset-0 w-full h-full block cursor-crosshair"
+            style={{ width: '100%', height: '100%' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            aria-label="Lago interativo — toque para criar ondas"
+            role="img"
+          />
         {/* 2D overlay: rain streaks rendered above WebGL */}
         <canvas
           ref={overlayCanvasRef}

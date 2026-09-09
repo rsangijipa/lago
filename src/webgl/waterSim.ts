@@ -11,6 +11,8 @@ export interface TexturePair {
   fbo: WebGLFramebuffer;
 }
 
+export interface AmbientConfig { lightDir: [number, number, number]; waterTint: [number, number, number]; ambientCode: number; }
+
 export class WebGLWaterSimulation {
   private gl: WebGLRenderingContext | WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
@@ -270,6 +272,22 @@ export class WebGLWaterSimulation {
     this.currentReadFboIndex = 1 - this.currentReadFboIndex;
   }
 
+  private uniformCache: Map<WebGLProgram, Record<string, WebGLUniformLocation>> = new Map();
+
+  private getUniform(program: WebGLProgram, name: string): WebGLUniformLocation {
+    let cache = this.uniformCache.get(program);
+    if (!cache) {
+      cache = {} as Record<string, WebGLUniformLocation>;
+      this.uniformCache.set(program, cache);
+    }
+    if (!(name in cache)) {
+      const loc = this.gl.getUniformLocation(program, name);
+      if (!loc) throw new Error(`Uniform ${name} not found`);
+      cache[name] = loc;
+    }
+    return cache[name];
+  }
+
   private bindQuad(program: WebGLProgram) {
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
@@ -293,7 +311,7 @@ export class WebGLWaterSimulation {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
-    gl.uniform1i(gl.getUniformLocation(this.dropProgram, 'u_texture'), 0);
+    gl.uniform1i(this.getUniform(this.dropProgram, 'u_texture'), 0);
 
     // Invert Y coordinate because canvas vs WebGL texture space
     gl.uniform2f(gl.getUniformLocation(this.dropProgram, 'u_center'), normX, 1.0 - normY);
@@ -322,7 +340,7 @@ export class WebGLWaterSimulation {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
-    gl.uniform1i(gl.getUniformLocation(this.updateProgram, 'u_texture'), 0);
+    gl.uniform1i(this.getUniform(this.updateProgram, 'u_texture'), 0);
 
     const delta = 1.0 / this.simResolution;
     gl.uniform2f(gl.getUniformLocation(this.updateProgram, 'u_delta'), delta, delta);
@@ -374,28 +392,28 @@ export class WebGLWaterSimulation {
     // Texture Unit 0: Water Heightfield
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_water'), 0);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_water'), 0);
 
     // Texture Unit 1: Underwater World
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.underwaterTexture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_underwater'), 1);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_underwater'), 1);
 
     // Texture Unit 2: Sky Reflection
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_sky'), 2);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_sky'), 2);
 
     // Texture Unit 3: Floating Elements
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.floatingTexture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_floating'), 3);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_floating'), 3);
 
     const delta = 1.0 / this.simResolution;
     gl.uniform2f(gl.getUniformLocation(this.compositeProgram, 'u_delta'), delta, delta);
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_refraction'), refractionStrength);
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_specular'), sunlightIntensity);
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_caustics'), causticsIntensity);
+    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_refraction'), refractionStrength);
+    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_specular'), sunlightIntensity);
+    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_caustics'), causticsIntensity);
 
     // Ambient Lighting & Water Tint
     let lightDir = [0.4, 0.7, 0.6];
@@ -414,7 +432,7 @@ export class WebGLWaterSimulation {
 
     gl.uniform3f(gl.getUniformLocation(this.compositeProgram, 'u_lightDir'), lightDir[0], lightDir[1], lightDir[2]);
     gl.uniform3f(gl.getUniformLocation(this.compositeProgram, 'u_waterTint'), waterTint[0], waterTint[1], waterTint[2]);
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_ambientMode'), ambientCode);
+    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_ambientMode'), ambientCode);
 
     this.bindQuad(this.compositeProgram);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
