@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+:root {
+  --pond-bg: #020617;
+  --pond-surface: rgba(2, 6, 23, 0.92);
+  --pond-surface-strong: rgba(15, 23, 42, 0.96);
+  --pond-border: rgba(71, 85, 105, 0.7);
+  --pond-text: #e2e8f0;
+  --pond-muted: #94a3b8;
+  --pond-focus: #67e8f9;
+  --pond-accent: #22d3ee;
+}
+
+/* ─── Custom Animations ─────────────────────────────────────────────────────── */
+
+@keyframes ring-pulse {
+  0%   { opacity: 0.7; transform: scale(1); }
+  60%  { opacity: 0.15; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(1.22); }
+}
+
+@keyframes koi-swim {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  35%       { transform: translateX(8px) rotate(8deg); }
+  65%       { transform: translateX(-5px) rotate(-5deg); }
+}
+
+@keyframes float-particle {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50%       { transform: translateY(-14px); opacity: 0.9; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ─── Animation Utility Classes ─────────────────────────────────────────────── */
+
+.animate-slide-up {
+  animation: slide-up 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-modal-in {
+  animation: modal-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease both;
+}
+
+/* ─── Custom range input ─────────────────────────────────────────────────────── */
+
+.pond-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #22d3ee, #0d9488);
+  outline: none;
+  min-height: 44px;
+  background: linear-gradient(to right, var(--pond-accent), #0d9488);
+}
+
+.pond-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #22d3ee;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.15);
+  transition: box-shadow 0.15s ease;
+}
+
+.pond-range::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 5px rgba(34, 211, 238, 0.25);
+}
+
+.pond-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #22d3ee;
+  cursor: pointer;
+}
+
+.pond-range:focus-visible,
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--pond-focus);
+  outline-offset: 3px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ─── Loading screen rings ──────────────────────────────────────────────────── */
+
+.loading-rings circle {
+  transform-origin: 80px 80px;
+}
+
+/* ─── Scrollbar (for any overflow sections) ─────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 116, 139, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 116, 139, 0.65);
+}
+
+/* ─── Prevent FOUC & ensure full bleed ─────────────────────────────────────── */
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--pond-bg);
+}
+
+/* ─── Touch action for canvas ───────────────────────────────────────────────── */
+
+canvas {
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .pond-range {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .loading-rings circle,
+  .loading-screen [style*="animation"] {
+    animation: none !important;
+  }
+}

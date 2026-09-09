@@ -1,0 +1,6 @@
+{
+  "name": "Lago WebGL",
+  "description": "Simulação interativa de lago em WebGL com ondulações de água sob toque, carpas, folhas flutuantes, chuva, pedras e reflexos realistas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
