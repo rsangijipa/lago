@@ -4,6 +4,8 @@ export type AmbientLighting = 'day' | 'sunset' | 'night';
 
 export type RainIntensity = 'none' | 'light' | 'medium';
 export type QualityProfile = 'economy' | 'balanced' | 'immersive';
+export type QualityMode = QualityProfile | 'auto';
+export type PondEnvironment = 'japanese_garden' | 'mountain_spring' | 'tropical_lagoon' | 'moonlit_marsh';
 
 export interface WaterSimConfig {
   damping: number; // 0.980 - 0.998
@@ -17,7 +19,8 @@ export interface WaterSimConfig {
   soundEnabled: boolean;
   mode: WaterInteractionMode;
   windActive: boolean;
-  quality: QualityProfile;
+  quality: QualityMode;
+  environment: PondEnvironment;
 }
 
 export interface KoiFishData {
@@ -79,7 +82,7 @@ export interface SplashParticle {
 export interface RainDrop {
   x: number;
   y: number;
-  vy: number;    // fall speed (px/frame)
+  vy: number; // fall speed (px/frame)
   length: number;
   alpha: number;
   life: number;

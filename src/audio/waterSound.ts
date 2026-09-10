@@ -5,7 +5,7 @@
 
 class WaterAudioEngine {
   private ctx: AudioContext | null = null;
-  private rainNode: AudioNode | null = null;
+  private rainNode: AudioBufferSourceNode | null = null;
   private rainGain: GainNode | null = null;
   private masterGain: GainNode | null = null;
   private isMuted: boolean = true;
@@ -24,7 +24,9 @@ class WaterAudioEngine {
 
   private initContext(): AudioContext {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) throw new Error('A API de áudio não está disponível neste navegador.');
       this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
@@ -41,13 +43,42 @@ class WaterAudioEngine {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
+    if (muted) this.stopRain();
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(muted ? 0 : 0.6, this.ctx.currentTime, 0.05);
     }
+    if (!muted && this.rainState !== 'none') this.setRain(this.rainState);
+  }
+
+  private stopRain() {
+    if (this.rainNode) {
+      try {
+        this.rainNode.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.rainNode.disconnect();
+      this.rainNode = null;
+    }
+    this.rainGain?.disconnect();
+    this.rainGain = null;
+  }
+
+  public suspend() {
+    if (this.ctx?.state === 'running') void this.ctx.suspend();
+  }
+  public resume() {
+    if (!this.isMuted && this.ctx?.state === 'suspended') void this.ctx.resume();
   }
 
   public getAvailable(): boolean {
-    return typeof window !== 'undefined' && Boolean(window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+    return (
+      typeof window !== 'undefined' &&
+      Boolean(
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext,
+      )
+    );
   }
 
   public getError(): string | null {
@@ -158,11 +189,10 @@ class WaterAudioEngine {
   public setRain(level: 'none' | 'light' | 'medium') {
     this.rainState = level;
     if (level === 'none') {
-      if (this.rainGain && this.ctx) {
-        this.rainGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
-      }
+      this.stopRain();
       return;
     }
+    if (this.isMuted) return;
 
     try {
       const ctx = this.initContext();
@@ -171,12 +201,14 @@ class WaterAudioEngine {
         const bufferSize = ctx.sampleRate * 2;
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
-        let b0 = 0, b1 = 0, b2 = 0;
+        let b0 = 0,
+          b1 = 0,
+          b2 = 0;
         for (let i = 0; i < bufferSize; i++) {
           const white = Math.random() * 2 - 1;
           b0 = 0.99886 * b0 + white * 0.0555179;
           b1 = 0.99332 * b1 + white * 0.0750759;
-          b2 = 0.96900 * b2 + white * 0.1538520;
+          b2 = 0.969 * b2 + white * 0.153852;
           data[i] = (b0 + b1 + b2) * 0.18;
         }
 

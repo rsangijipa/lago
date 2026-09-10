@@ -1,19 +1,44 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Lago
 
-# Run and deploy your AI Studio app
+Experiência sensorial de um lago interativo, renderizada localmente com React, TypeScript e WebGL2. Ondas, carpas, vegetação, chuva, vento, reflexos e áudio procedural funcionam sem serviços externos.
 
-This contains everything you need to run your app locally.
+## Requisitos e execução
 
-View your app in AI Studio: https://ai.studio/apps/fca6af73-69c0-4cce-b867-163c4b1afb72
+- Node.js 20+
+- Navegador moderno com WebGL2 e framebuffer de ponto flutuante
 
-## Run Locally
+```bash
+npm install
+npm run dev
+```
 
-**Prerequisites:** Node.js
+## Controles
 
+- Ponteiro/toque: interage conforme o modo selecionado.
+- `Espaço`: onda central.
+- `P`: pedra. `A`: alimento. `V`: vento. `R`: acalmar. `M`: áudio.
 
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+Os controles desaparecem após alguns segundos de inatividade. O Modo Zen oculta toda a interface.
+
+## Qualidade e arquitetura
+
+`Auto` observa o tempo dos frames e alterna gradualmente entre Economy, Balanced e Immersive. Os três perfis continuam disponíveis como override manual.
+
+- `src/engine`: coordenadas normalizadas e timestep fixo.
+- `src/performance`: qualidade adaptativa com histerese.
+- `src/webgl`: heightfield, forças GPU, micro-ondas e composição WebGL2.
+- `src/simulation`: carpas e vegetação com movimento baseado em tempo.
+- `src/components`: adaptadores React, controles e acessibilidade.
+- `src/audio`: áudio procedural e lifecycle de visibilidade.
+
+## Verificação
+
+```bash
+npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run test:e2e
+```
+
+O desenho e o plano da modernização ficam em `docs/superpowers/`.
