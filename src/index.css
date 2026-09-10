@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 :root {
   --pond-bg: #020617;
@@ -14,35 +14,74 @@
 /* ─── Custom Animations ─────────────────────────────────────────────────────── */
 
 @keyframes ring-pulse {
-  0%   { opacity: 0.7; transform: scale(1); }
-  60%  { opacity: 0.15; transform: scale(1.12); }
-  100% { opacity: 0; transform: scale(1.22); }
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  60% {
+    opacity: 0.15;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
 }
 
 @keyframes koi-swim {
-  0%, 100% { transform: translateX(0) rotate(0deg); }
-  35%       { transform: translateX(8px) rotate(8deg); }
-  65%       { transform: translateX(-5px) rotate(-5deg); }
+  0%,
+  100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  35% {
+    transform: translateX(8px) rotate(8deg);
+  }
+  65% {
+    transform: translateX(-5px) rotate(-5deg);
+  }
 }
 
 @keyframes float-particle {
-  0%, 100% { transform: translateY(0); opacity: 0.4; }
-  50%       { transform: translateY(-14px); opacity: 0.9; }
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-14px);
+    opacity: 0.9;
+  }
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes modal-in {
-  from { opacity: 0; transform: scale(0.96) translateY(8px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ─── Animation Utility Classes ─────────────────────────────────────────────── */
@@ -138,10 +177,18 @@ button:disabled {
 
 /* ─── Prevent FOUC & ensure full bleed ─────────────────────────────────────── */
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   overflow: hidden;
   background-color: var(--pond-bg);
+}
+
+.pond-app {
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
 }
 
 /* ─── Touch action for canvas ───────────────────────────────────────────────── */
@@ -155,17 +202,29 @@ canvas {
   .pond-range {
     width: 100%;
   }
+  #dock-primary-controls {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pond-settings-sheet {
+    max-height: min(72dvh, 620px);
+    overflow-y: auto;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
   .loading-rings circle,
-  .loading-screen [style*="animation"] {
+  .loading-screen [style*='animation'] {
     animation: none !important;
   }
 }

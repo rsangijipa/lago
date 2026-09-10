@@ -59,7 +59,7 @@ export function updateKoiFish(
   height: number,
   ripples: { x: number; y: number; strength: number }[],
   foodPellets: FoodPellet[],
-  dt: number
+  dt: number,
 ) {
   const spineSegments = 12;
 
@@ -71,7 +71,7 @@ export function updateKoiFish(
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 160 && rip.strength > 0.08) {
         fish.isFrightened = true;
-        fish.frightenedTimer = 45; // Frames of frightened darting
+        fish.frightenedTimer = 750; // milliseconds of frightened darting
         // Dart directly away from the disturbance
         fish.targetAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.6;
         fish.speed = fish.maxSpeed * 1.6;
@@ -112,7 +112,7 @@ export function updateKoiFish(
     // 3. Normal wandering behavior
     if (!targetFound) {
       if (fish.isFrightened) {
-        fish.frightenedTimer--;
+        fish.frightenedTimer -= dt;
         if (fish.frightenedTimer <= 0) {
           fish.isFrightened = false;
         }
@@ -150,6 +150,20 @@ export function updateKoiFish(
       fish.speed = Math.max(fish.speed, 2.0);
     }
 
+    // Keep a comfortable personal space so the school does not visually overlap.
+    for (const other of fishList) {
+      if (other === fish) continue;
+      const dx = fish.x - other.x;
+      const dy = fish.y - other.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const comfortDistance = (fish.size + other.size) * 1.15;
+      if (distance < comfortDistance) {
+        const separation = (comfortDistance - distance) / comfortDistance;
+        fish.targetAngle = Math.atan2(dy, dx);
+        fish.speed = Math.max(fish.speed, 1.4 + separation * 1.6);
+      }
+    }
+
     // 5. Turn smoothly towards target angle
     let diff = fish.targetAngle - fish.angle;
     while (diff < -Math.PI) diff += Math.PI * 2;
@@ -163,7 +177,7 @@ export function updateKoiFish(
     fish.y += Math.sin(fish.angle) * moveStep;
 
     // 7. Update spine wiggle & segments (Inverse Kinematics chain)
-    fish.wigglePhase += (fish.wiggleSpeed * fish.speed) * (dt / 16.6);
+    fish.wigglePhase += fish.wiggleSpeed * fish.speed * (dt / 16.6);
     const segDist = fish.spineLength / spineSegments;
 
     // Head is segment 0
@@ -198,7 +212,7 @@ export function updateKoiFish(
 export function renderKoiFishOnCanvas(
   ctx: CanvasRenderingContext2D,
   fishList: KoiFishData[],
-  ambient: 'day' | 'sunset' | 'night'
+  ambient: 'day' | 'sunset' | 'night',
 ) {
   for (const fish of fishList) {
     const { bodyPoints, size, variety, angle, wigglePhase } = fish;
@@ -316,7 +330,7 @@ export function renderKoiFishOnCanvas(
       leftFlank[2]?.x || 0,
       leftFlank[2]?.y || 0,
       rightFlank[2]?.x || 0,
-      rightFlank[2]?.y || 0
+      rightFlank[2]?.y || 0,
     );
     fishGrad.addColorStop(0, 'rgba(0, 0, 0, 0.22)');
     fishGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.35)');
@@ -428,12 +442,19 @@ function drawTailFin(
   length: number,
   width: number,
   variety: string,
-  wiggle: number
+  wiggle: number,
 ) {
   const tailSway = Math.sin(wiggle) * 4;
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.bezierCurveTo(length * 0.4, -width * 0.7, length * 0.9, -width * 0.9 + tailSway, length, -width * 0.4 + tailSway);
+  ctx.bezierCurveTo(
+    length * 0.4,
+    -width * 0.7,
+    length * 0.9,
+    -width * 0.9 + tailSway,
+    length,
+    -width * 0.4 + tailSway,
+  );
   ctx.bezierCurveTo(length * 0.75, 0 + tailSway, length * 0.75, 0 + tailSway, length, width * 0.4 + tailSway);
   ctx.bezierCurveTo(length * 0.9, width * 0.9 + tailSway, length * 0.4, width * 0.7, 0, 0);
   ctx.closePath();

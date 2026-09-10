@@ -1,21 +1,24 @@
-import React, {
-  useEffect,
-  useRef,
-  useCallback,
-  useImperativeHandle,
-  forwardRef,
-} from 'react';
+import React, { useEffect, useRef, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
 import { WebGLWaterSimulation } from '../webgl/waterSim';
 import { createRiverbedCanvas, createSkyCanvas } from '../webgl/riverbedTexture';
 import { createKoiFish, updateKoiFish, renderKoiFishOnCanvas } from '../simulation/koiFish';
-import { createFloatingLeaves, updateFloatingLeaves, renderLeavesOnCanvas } from '../simulation/floatingLeaves';
+import {
+  createFloatingLeaves,
+  updateFloatingLeaves,
+  renderLeavesOnCanvas,
+} from '../simulation/floatingLeaves';
 import { waterAudio } from '../audio/waterSound';
 import { WaterSimConfig, KoiFishData, FloatingLeaf, FoodPellet, SplashParticle, RainDrop } from '../types';
 import { QualityProfile } from '../types';
+import { normalizedToPixels, pointerToNormalized, type NormalizedPoint } from '../engine/CoordinateSystem';
+import { FixedStepClock, secondsFromMilliseconds } from '../engine/Time';
+import { QualityManager } from '../performance/QualityManager';
 
 export interface PondCanvasHandle {
   clearLake: () => void;
   tossRandomStone: () => void;
+  createCenterRipple: () => void;
+  feedCenter: () => void;
 }
 
 interface PondCanvasProps {
@@ -29,32 +32,19 @@ interface PondCanvasProps {
   onAudioStatus?: (status: { available: boolean; error: string | null }) => void;
 }
 
-// ─── Rain overlay dimensions (separate from sim space) ───────────────────────
-const RAIN_W = 1024;
-const RAIN_H = 1024;
-
-// ─── Wind: drop a sparse wave grid across the surface ────────────────────────
-function applyWindDrops(
-  sim: WebGLWaterSimulation,
-  intensity: number,
-  phase: number,
-) {
-  const cols = 6;
-  const rows = 4;
-  for (let c = 0; c < cols; c++) {
-    for (let r = 0; r < rows; r++) {
-      const nx = (c + 0.5 + Math.sin(phase + r * 1.3) * 0.18) / cols;
-      const ny = (r + 0.5 + Math.cos(phase * 0.7 + c * 1.1) * 0.18) / rows;
-      const radius = 0.04 + Math.abs(Math.sin(phase + c * 0.9)) * 0.06;
-      const strength = intensity * (0.04 + Math.abs(Math.cos(phase * 1.2 + r)) * 0.06);
-      sim.addDrop(nx, ny, radius, strength);
-    }
-  }
-}
+const qualitySettings: Record<
+  QualityProfile,
+  { sim: number; texture: number; dpr: number; textureCadence: number }
+> = {
+  economy: { sim: 256, texture: 512, dpr: 1, textureCadence: 50 },
+  balanced: { sim: 384, texture: 768, dpr: 1.5, textureCadence: 33 },
+  immersive: { sim: 512, texture: 1024, dpr: 2, textureCadence: 33 },
+};
 
 export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
   ({ config, onLoadProgress, onLoadComplete, onWebGLError, onAudioStatus }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const [contextGeneration, setContextGeneration] = useState(0);
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null); // 2D rain overlay
     const simRef = useRef<WebGLWaterSimulation | null>(null);
 
@@ -63,7 +53,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
     const leavesRef = useRef<FloatingLeaf[]>([]);
     const foodRef = useRef<FoodPellet[]>([]);
     const splashParticlesRef = useRef<SplashParticle[]>([]);
-    const recentRipplesRef = useRef<{ x: number; y: number; strength: number }[]>([]);
+    const recentRipplesRef = useRef<(NormalizedPoint & { strength: number })[]>([]);
     const rainDropsRef = useRef<RainDrop[]>([]); // visual rain streaks
 
     // Offscreen canvases for GPU texture uploads
@@ -72,21 +62,21 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
     const floatingCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     // Interaction & loop state
-    const activePointersRef = useRef<Map<number, { lastX: number; lastY: number; lastTime: number }>>(new Map());
+    const activePointersRef = useRef<Map<number, { lastX: number; lastY: number; lastTime: number }>>(
+      new Map(),
+    );
     const lastRainDropTimeRef = useRef<number>(0);
+    const lastKoiWakeTimeRef = useRef<number>(0);
     const animFrameIdRef = useRef<number>(0);
     const windPhaseRef = useRef<number>(0);
     const isMountedRef = useRef(false);
     const timeoutIdsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
     const lastTextureUploadRef = useRef(0);
     const reducedMotionRef = useRef(false);
-    const qualityRef = useRef<QualityProfile>(config.quality);
-
-    const qualitySettings: Record<QualityProfile, { sim: number; texture: number; dpr: number; textureCadence: number }> = {
-      economy: { sim: 256, texture: 512, dpr: 1, textureCadence: 50 },
-      balanced: { sim: 384, texture: 768, dpr: 1.5, textureCadence: 33 },
-      immersive: { sim: 512, texture: 1024, dpr: 2, textureCadence: 33 },
-    };
+    const initialQuality: QualityProfile = config.quality === 'auto' ? 'balanced' : config.quality;
+    const qualityRef = useRef<QualityProfile>(initialQuality);
+    const qualityManagerRef = useRef(new QualityManager(initialQuality));
+    const isPausedRef = useRef(document.visibilityState === 'hidden');
 
     const scheduleTimeout = useCallback((callback: () => void, delay: number) => {
       const timeoutId = setTimeout(() => {
@@ -100,7 +90,6 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
     const configRef = useRef(config);
     useEffect(() => {
       configRef.current = config;
-      qualityRef.current = config.quality;
     }, [config]);
 
     // ── Audio sync ──────────────────────────────────────────────────────────
@@ -123,15 +112,48 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
     useEffect(() => {
       const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-      const update = () => { reducedMotionRef.current = media.matches; };
+      const update = () => {
+        reducedMotionRef.current = media.matches;
+      };
       update();
       media.addEventListener?.('change', update);
       return () => media.removeEventListener?.('change', update);
     }, []);
 
+    useEffect(() => {
+      const onVisibility = () => {
+        isPausedRef.current = document.visibilityState === 'hidden';
+        if (isPausedRef.current) waterAudio.suspend();
+        else waterAudio.resume();
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, []);
+
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const onLost = (event: Event) => {
+        event.preventDefault();
+        isPausedRef.current = true;
+        onWebGLError?.('O contexto gráfico foi perdido. Tentando restaurar…');
+      };
+      const onRestored = () => {
+        isPausedRef.current = false;
+        setContextGeneration((value) => value + 1);
+      };
+      canvas.addEventListener('webglcontextlost', onLost);
+      canvas.addEventListener('webglcontextrestored', onRestored);
+      return () => {
+        canvas.removeEventListener('webglcontextlost', onLost);
+        canvas.removeEventListener('webglcontextrestored', onRestored);
+      };
+    }, [onWebGLError]);
+
     // ── Initialisation (runs once) ──────────────────────────────────────────
     useEffect(() => {
       isMountedRef.current = true;
+      const timeoutIds = timeoutIdsRef.current;
       const canvas = canvasRef.current;
       if (!canvas) {
         isMountedRef.current = false;
@@ -142,13 +164,15 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       onLoadProgress?.(10);
       let sim: WebGLWaterSimulation;
       try {
-        const quality = qualitySettings[configRef.current.quality];
+        const quality = qualitySettings[qualityRef.current];
         sim = new WebGLWaterSimulation(canvas, quality.sim);
         simRef.current = sim;
         onWebGLError?.(null);
       } catch (err) {
         console.error('WebGL init failed:', err);
-        onWebGLError?.('A aceleração WebGL não está disponível. Você ainda pode usar os controles, mas a água interativa não pôde ser renderizada.');
+        onWebGLError?.(
+          'A aceleração WebGL não está disponível. Você ainda pode usar os controles, mas a água interativa não pôde ser renderizada.',
+        );
         isMountedRef.current = false;
         onLoadProgress?.(100);
         onLoadComplete?.();
@@ -157,8 +181,13 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       onLoadProgress?.(25);
 
       // Stage 1 – Offscreen canvases
-      const textureSize = qualitySettings[configRef.current.quality].texture;
-      riverbedCanvasRef.current = createRiverbedCanvas(textureSize, textureSize);
+      const textureSize = qualitySettings[qualityRef.current].texture;
+      riverbedCanvasRef.current = createRiverbedCanvas(
+        textureSize,
+        textureSize,
+        configRef.current.environment,
+      );
+      sim.updateRiverbedTexture(riverbedCanvasRef.current);
       onLoadProgress?.(45);
 
       const underCanvas = document.createElement('canvas');
@@ -194,14 +223,12 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
       return () => {
         isMountedRef.current = false;
-        cancelAnimationFrame(animFrameIdRef.current);
-        timeoutIdsRef.current.forEach(clearTimeout);
-        timeoutIdsRef.current.clear();
+        timeoutIds.forEach(clearTimeout);
+        timeoutIds.clear();
         sim.dispose();
         simRef.current = null;
       };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scheduleTimeout, config.quality, onLoadComplete, onLoadProgress, onWebGLError]);
+    }, [contextGeneration, scheduleTimeout, onLoadComplete, onLoadProgress, onWebGLError]);
 
     // ── Sky texture refresh on ambient change ───────────────────────────────
     useEffect(() => {
@@ -209,6 +236,14 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       const sky = createSkyCanvas(512, 512, config.ambient);
       simRef.current.updateSkyTexture(sky);
     }, [config.ambient]);
+
+    // Rebuild the procedural bed only when the chosen ecosystem changes.
+    useEffect(() => {
+      const textureSize = qualitySettings[qualityRef.current].texture;
+      riverbedCanvasRef.current = createRiverbedCanvas(textureSize, textureSize, config.environment);
+      simRef.current?.updateRiverbedTexture(riverbedCanvasRef.current);
+      lastTextureUploadRef.current = 0;
+    }, [config.environment]);
 
     // ── Resize handler ──────────────────────────────────────────────────────
     const handleResize = useCallback(() => {
@@ -235,9 +270,36 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       return () => window.removeEventListener('resize', handleResize);
     }, [handleResize]);
 
+    useEffect(() => {
+      const profile = qualityManagerRef.current.setMode(config.quality);
+      if (profile === qualityRef.current) return;
+      qualityRef.current = profile;
+      const settings = qualitySettings[profile];
+      simRef.current?.setResolution(settings.sim);
+      riverbedCanvasRef.current = createRiverbedCanvas(
+        settings.texture,
+        settings.texture,
+        config.environment,
+      );
+      simRef.current?.updateRiverbedTexture(riverbedCanvasRef.current);
+      if (underwaterCanvasRef.current)
+        underwaterCanvasRef.current.width = underwaterCanvasRef.current.height = settings.texture;
+      if (floatingCanvasRef.current)
+        floatingCanvasRef.current.width = floatingCanvasRef.current.height = settings.texture;
+      fishRef.current = createKoiFish(
+        profile === 'economy' ? 4 : profile === 'balanced' ? 7 : 10,
+        settings.texture,
+        settings.texture,
+      );
+      leavesRef.current = createFloatingLeaves(settings.texture, settings.texture);
+      lastTextureUploadRef.current = 0;
+      handleResize();
+    }, [config.environment, config.quality, handleResize]);
+
     // ── Main animation loop (stable — uses configRef, never restarts) ───────
     useEffect(() => {
       let lastTime = performance.now();
+      const physicsClock = new FixedStepClock();
       // Throttle: skip frame if last render was less than ~13ms ago (≈75 fps cap)
       const MIN_FRAME_MS = 13;
 
@@ -249,13 +311,40 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
         const dt = Math.min(elapsed, 50);
         lastTime = currentTime;
+        if (isPausedRef.current) {
+          physicsClock.reset();
+          return;
+        }
 
         const cfg = configRef.current;
         const sim = simRef.current;
         const canvas = canvasRef.current;
         if (!sim || !canvas) return;
 
-        const textureSize = qualitySettings[cfg.quality].texture;
+        const nextQuality = qualityManagerRef.current.sample(dt);
+        if (nextQuality !== qualityRef.current) {
+          qualityRef.current = nextQuality;
+          const settings = qualitySettings[nextQuality];
+          sim.setResolution(settings.sim);
+          riverbedCanvasRef.current = createRiverbedCanvas(
+            settings.texture,
+            settings.texture,
+            cfg.environment,
+          );
+          if (underwaterCanvasRef.current)
+            underwaterCanvasRef.current.width = underwaterCanvasRef.current.height = settings.texture;
+          if (floatingCanvasRef.current)
+            floatingCanvasRef.current.width = floatingCanvasRef.current.height = settings.texture;
+          fishRef.current = createKoiFish(
+            nextQuality === 'economy' ? 4 : nextQuality === 'balanced' ? 7 : 10,
+            settings.texture,
+            settings.texture,
+          );
+          leavesRef.current = createFloatingLeaves(settings.texture, settings.texture);
+          lastTextureUploadRef.current = 0;
+          handleResize();
+        }
+        const textureSize = qualitySettings[qualityRef.current].texture;
         const W = textureSize;
         const H = textureSize;
 
@@ -269,7 +358,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
             const radius = 0.012 + Math.random() * 0.02;
             const strength = 0.06 + Math.random() * 0.12;
             sim.addDrop(rx, ry, radius, strength);
-            recentRipplesRef.current.push({ x: rx * W, y: ry * H, strength });
+            recentRipplesRef.current.push({ x: rx, y: ry, strength });
             if (Math.random() < 0.22) waterAudio.playDrop(0.18);
 
             // Spawn a visual rain streak on the overlay
@@ -288,7 +377,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
         // ── 2. Wind mode ───────────────────────────────────────────────────
         if (!reducedMotionRef.current && cfg.mode === 'wind' && cfg.windActive) {
           windPhaseRef.current += dt * 0.0012;
-          applyWindDrops(sim, 0.55, windPhaseRef.current);
+          sim.applyWind(windPhaseRef.current, 0.0035);
         }
 
         // ── 3. Trim ripple buffer ──────────────────────────────────────────
@@ -298,12 +387,36 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
         // ── 4. Fish ────────────────────────────────────────────────────────
         if (cfg.showFish && !reducedMotionRef.current) {
-          updateKoiFish(fishRef.current, W, H, recentRipplesRef.current, foodRef.current, dt);
+          const pixelRipples = recentRipplesRef.current.map((r) => ({
+            ...normalizedToPixels(r, W, H),
+            strength: r.strength,
+          }));
+          updateKoiFish(fishRef.current, W, H, pixelRipples, foodRef.current, dt);
+          if (currentTime - lastKoiWakeTimeRef.current > 110 && fishRef.current.length) {
+            const fish = fishRef.current.reduce((fastest, item) =>
+              item.speed > fastest.speed ? item : fastest,
+            );
+            const wakeX = Math.max(0, Math.min(1, fish.x / W));
+            const wakeY = Math.max(0, Math.min(1, fish.y / H));
+            sim.addDrop(wakeX, wakeY, 0.012 + (fish.size / W) * 0.08, Math.min(0.035, fish.speed * 0.006));
+            lastKoiWakeTimeRef.current = currentTime;
+          }
         }
 
         // ── 5. Leaves ──────────────────────────────────────────────────────
         if (cfg.showLeaves && !reducedMotionRef.current) {
-          updateFloatingLeaves(leavesRef.current, W, H, recentRipplesRef.current, currentTime);
+          const pixelRipples = recentRipplesRef.current.map((r) => ({
+            ...normalizedToPixels(r, W, H),
+            strength: r.strength,
+          }));
+          updateFloatingLeaves(
+            leavesRef.current,
+            W,
+            H,
+            pixelRipples,
+            currentTime,
+            secondsFromMilliseconds(dt),
+          );
         }
 
         // ── 6. Food decay ──────────────────────────────────────────────────
@@ -312,9 +425,10 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
         // ── 7. Splash particles ────────────────────────────────────────────
         for (const p of splashParticlesRef.current) {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.35;
+          const frameScale = secondsFromMilliseconds(dt) * 60;
+          p.x += p.vx * frameScale;
+          p.y += p.vy * frameScale;
+          p.vy += 0.35 * frameScale;
           p.life += dt;
           p.alpha = Math.max(0, 1 - p.life / p.maxLife);
         }
@@ -322,7 +436,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
         // ── 8. Rain streaks update ─────────────────────────────────────────
         for (const r of rainDropsRef.current) {
-          r.y += r.vy;
+          r.y += r.vy * secondsFromMilliseconds(dt) * 60;
           r.life += dt;
           r.alpha = Math.max(0, r.alpha * (1 - r.life / r.maxLife));
         }
@@ -333,17 +447,18 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
         }
 
         // ── 9. Underwater texture (riverbed + tint + food + koi) ───────────
-        const shouldUploadTextures = currentTime - lastTextureUploadRef.current >= qualitySettings[cfg.quality].textureCadence;
+        const shouldUploadTextures =
+          currentTime - lastTextureUploadRef.current >= qualitySettings[qualityRef.current].textureCadence;
         const underCanvas = underwaterCanvasRef.current;
         const underCtx = underCanvas?.getContext('2d');
-        if (shouldUploadTextures && underCanvas && underCtx && riverbedCanvasRef.current) {
-          underCtx.drawImage(riverbedCanvasRef.current, 0, 0, W, H);
+        if (shouldUploadTextures && underCanvas && underCtx) {
+          underCtx.clearRect(0, 0, W, H);
 
           if (cfg.ambient === 'sunset') {
-            underCtx.fillStyle = 'rgba(120, 50, 40, 0.22)';
+            underCtx.fillStyle = 'rgba(120, 50, 40, 0.12)';
             underCtx.fillRect(0, 0, W, H);
           } else if (cfg.ambient === 'night') {
-            underCtx.fillStyle = 'rgba(5, 12, 28, 0.55)';
+            underCtx.fillStyle = 'rgba(5, 12, 28, 0.24)';
             underCtx.fillRect(0, 0, W, H);
           }
 
@@ -389,8 +504,10 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
           lastTextureUploadRef.current = currentTime;
         }
 
-        // ── 11. Wave physics step ──────────────────────────────────────────
-        sim.step(cfg.damping);
+        // ── 11. Fixed-timestep wave physics ────────────────────────────────
+        // Wave speed and damping now stay consistent across 30–75 fps devices.
+        const physicsSteps = physicsClock.consume(secondsFromMilliseconds(dt));
+        for (let step = 0; step < physicsSteps; step++) sim.step(cfg.damping);
 
         // ── 12. WebGL composite render ─────────────────────────────────────
         sim.render(
@@ -408,8 +525,8 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
       animFrameIdRef.current = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(animFrameIdRef.current);
-    // Intentionally stable — reads live config via configRef
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      // Intentionally stable — reads live config via configRef
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ── Rain overlay renderer (Canvas2D above the WebGL canvas) ─────────────
@@ -423,8 +540,9 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
       if (cfg.rainIntensity === 'none' || rainDropsRef.current.length === 0) return;
 
-      const scaleX = overlay.width / RAIN_W;
-      const scaleY = overlay.height / RAIN_H;
+      const textureSize = qualitySettings[qualityRef.current].texture;
+      const scaleX = overlay.width / textureSize;
+      const scaleY = overlay.height / textureSize;
 
       // Wind tilt for rain: medium rain tilts streaks slightly
       const tiltX = cfg.rainIntensity === 'medium' ? 0.22 : 0.08;
@@ -473,8 +591,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
       canvas.setPointerCapture(e.pointerId);
       const rect = canvas.getBoundingClientRect();
-      const normX = (e.clientX - rect.left) / rect.width;
-      const normY = (e.clientY - rect.top) / rect.height;
+      const { x: normX, y: normY } = pointerToNormalized(e.clientX, e.clientY, rect);
 
       activePointersRef.current.set(e.pointerId, {
         lastX: normX,
@@ -486,7 +603,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
       if (cfg.mode === 'ripple') {
         sim.addDrop(normX, normY, 0.028, 0.18);
-        recentRipplesRef.current.push({ x: normX * 1024, y: normY * 1024, strength: 0.18 });
+        recentRipplesRef.current.push({ x: normX, y: normY, strength: 0.18 });
         waterAudio.playDrop(0.45);
       } else if (cfg.mode === 'stone') {
         tossStone(normX, normY);
@@ -497,7 +614,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
         sim.addDrop(normX, normY, 0.08, 0.35);
         sim.addDrop(normX + 0.04, normY, 0.06, 0.2);
         sim.addDrop(normX - 0.04, normY + 0.03, 0.07, 0.18);
-        recentRipplesRef.current.push({ x: normX * 1024, y: normY * 1024, strength: 0.35 });
+        recentRipplesRef.current.push({ x: normX, y: normY, strength: 0.35 });
       }
       onAudioStatus?.({ available: waterAudio.getAvailable(), error: waterAudio.getError() });
     };
@@ -511,8 +628,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       if (!track) return;
 
       const rect = canvas.getBoundingClientRect();
-      const normX = (e.clientX - rect.left) / rect.width;
-      const normY = (e.clientY - rect.top) / rect.height;
+      const { x: normX, y: normY } = pointerToNormalized(e.clientX, e.clientY, rect);
       const now = performance.now();
 
       const dx = normX - track.lastX;
@@ -527,7 +643,7 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
         const radius = Math.min(0.045, 0.02 + speed * 0.035);
         const strength = Math.min(0.24, 0.08 + speed * 0.15);
         sim.addDrop(normX, normY, radius, strength);
-        recentRipplesRef.current.push({ x: normX * 1024, y: normY * 1024, strength });
+        recentRipplesRef.current.push({ x: normX, y: normY, strength });
         if (Math.random() < 0.18) waterAudio.playDrop(0.2 + speed * 0.3);
         track.lastX = normX;
         track.lastY = normY;
@@ -543,7 +659,11 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
 
     const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
       activePointersRef.current.delete(e.pointerId);
-      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* noop */
+      }
     };
 
     // ── Actions ─────────────────────────────────────────────────────────────
@@ -553,17 +673,18 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
       sim.addDrop(normX, normY, 0.065, 0.55);
       scheduleTimeout(() => sim.addDrop(normX, normY, 0.04, -0.3), 60);
       scheduleTimeout(() => sim.addDrop(normX, normY, 0.05, 0.25), 140);
-      recentRipplesRef.current.push({ x: normX * 1024, y: normY * 1024, strength: 0.6 });
+      recentRipplesRef.current.push({ x: normX, y: normY, strength: 0.6 });
       waterAudio.playStoneSplash(0.85);
       onAudioStatus?.({ available: waterAudio.getAvailable(), error: waterAudio.getError() });
 
-      const wx = normX * 1024;
-      const wy = normY * 1024;
+      const textureSize = qualitySettings[qualityRef.current].texture;
+      const { x: wx, y: wy } = normalizedToPixels({ x: normX, y: normY }, textureSize, textureSize);
       for (let i = 0; i < 14; i++) {
         const angle = Math.random() * Math.PI * 2;
         const spd = 2 + Math.random() * 5;
         splashParticlesRef.current.push({
-          x: wx, y: wy,
+          x: wx,
+          y: wy,
           vx: Math.cos(angle) * spd,
           vy: -3 - Math.random() * 6,
           radius: 2 + Math.random() * 3.5,
@@ -577,8 +698,8 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
     const dropFood = (normX: number, normY: number) => {
       const sim = simRef.current;
       if (!sim) return;
-      const wx = normX * 1024;
-      const wy = normY * 1024;
+      const textureSize = qualitySettings[qualityRef.current].texture;
+      const { x: wx, y: wy } = normalizedToPixels({ x: normX, y: normY }, textureSize, textureSize);
       sim.addDrop(normX, normY, 0.018, 0.12);
       waterAudio.playDrop(0.3);
       onAudioStatus?.({ available: waterAudio.getAvailable(), error: waterAudio.getError() });
@@ -604,23 +725,29 @@ export const PondCanvas = forwardRef<PondCanvasHandle, PondCanvasProps>(
         const ry = 0.3 + Math.random() * 0.4;
         tossStone(rx, ry);
       },
+      createCenterRipple: () => {
+        simRef.current?.addDrop(0.5, 0.5, 0.04, 0.22);
+        recentRipplesRef.current.push({ x: 0.5, y: 0.5, strength: 0.22 });
+      },
+      feedCenter: () => dropFood(0.5, 0.5),
     }));
 
     return (
       <div className="relative w-full h-full overflow-hidden bg-slate-950 touch-none select-none">
         {/* WebGL water simulation canvas */}
-<canvas
-            ref={canvasRef}
-            id="webgl-pond-canvas"
-            className="absolute inset-0 w-full h-full block cursor-crosshair"
-            style={{ width: '100%', height: '100%' }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            aria-label="Lago interativo — toque para criar ondas"
-            role="img"
-          />
+        <canvas
+          ref={canvasRef}
+          id="webgl-pond-canvas"
+          className="absolute inset-0 w-full h-full block cursor-crosshair"
+          style={{ width: '100%', height: '100%' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          aria-label="Lago interativo. Use Espaço para onda, P para pedra, A para alimentar, V para vento, R para limpar e M para som."
+          role="application"
+          tabIndex={0}
+        />
         {/* 2D overlay: rain streaks rendered above WebGL */}
         <canvas
           ref={overlayCanvasRef}

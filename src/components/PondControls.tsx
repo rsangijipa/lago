@@ -16,7 +16,14 @@ import {
   Fish,
   Leaf,
 } from 'lucide-react';
-import { WaterSimConfig, WaterInteractionMode, AmbientLighting, RainIntensity, QualityProfile } from '../types';
+import {
+  WaterSimConfig,
+  WaterInteractionMode,
+  AmbientLighting,
+  RainIntensity,
+  QualityMode,
+  PondEnvironment,
+} from '../types';
 
 interface PondControlsProps {
   config: WaterSimConfig;
@@ -30,9 +37,11 @@ interface PondControlsProps {
 const Tip: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="group relative flex items-center justify-center">
     {children}
-    <span className="pointer-events-none absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap
+    <span
+      className="pointer-events-none absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap
       rounded-lg bg-slate-800/95 border border-slate-700/60 px-2 py-1 text-[10px] text-slate-300 shadow-xl
-      opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 z-50">
+      opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:scale-100 transition-all duration-150 z-50"
+    >
       {label}
     </span>
   </div>
@@ -88,20 +97,20 @@ export const PondControls: React.FC<PondControlsProps> = ({
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 w-full max-w-xl px-4 pointer-events-none select-none">
       <div className="pointer-events-auto flex flex-col items-center gap-2">
-
         {/* ── Expanded Panel ─────────────────────────────────────────── */}
         {isExpanded && (
           <div
             id="panel-expanded-controls"
-            className="w-full bg-slate-950/90 backdrop-blur-xl text-slate-100 rounded-2xl
+            className="pond-settings-sheet w-full bg-slate-950/90 backdrop-blur-xl text-slate-100 rounded-2xl
               border border-slate-700/50 p-4 shadow-2xl
               animate-slide-up"
           >
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
-
               {/* Elementos */}
               <div className="flex flex-col gap-2">
-                <span className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">Elementos</span>
+                <span className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">
+                  Elementos
+                </span>
                 <div className="flex gap-1.5">
                   <button
                     id="btn-toggle-fish"
@@ -136,13 +145,30 @@ export const PondControls: React.FC<PondControlsProps> = ({
 
               {/* Iluminação */}
               <div className="flex flex-col gap-2">
-                <span className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">Iluminação</span>
+                <span className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">
+                  Iluminação
+                </span>
                 <div className="flex gap-1">
                   {(
                     [
-                      { val: 'day',    icon: <Sun className="w-3.5 h-3.5" />,    label: 'Dia Ensolarado',  active: 'bg-sky-500/25 border-sky-400/70 text-sky-200' },
-                      { val: 'sunset', icon: <Sunset className="w-3.5 h-3.5" />, label: 'Pôr do Sol',      active: 'bg-orange-500/25 border-orange-400/70 text-orange-200' },
-                      { val: 'night',  icon: <Moon className="w-3.5 h-3.5" />,   label: 'Noite ao Luar',   active: 'bg-indigo-500/25 border-indigo-400/70 text-indigo-200' },
+                      {
+                        val: 'day',
+                        icon: <Sun className="w-3.5 h-3.5" />,
+                        label: 'Dia Ensolarado',
+                        active: 'bg-sky-500/25 border-sky-400/70 text-sky-200',
+                      },
+                      {
+                        val: 'sunset',
+                        icon: <Sunset className="w-3.5 h-3.5" />,
+                        label: 'Pôr do Sol',
+                        active: 'bg-orange-500/25 border-orange-400/70 text-orange-200',
+                      },
+                      {
+                        val: 'night',
+                        icon: <Moon className="w-3.5 h-3.5" />,
+                        label: 'Noite ao Luar',
+                        active: 'bg-indigo-500/25 border-indigo-400/70 text-indigo-200',
+                      },
                     ] as const
                   ).map(({ val, icon, label, active }) => (
                     <Tip key={val} label={label}>
@@ -168,8 +194,12 @@ export const PondControls: React.FC<PondControlsProps> = ({
               {/* Persistência da Onda */}
               <div className="flex flex-col gap-2 col-span-2 sm:col-span-1">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-slate-500 uppercase tracking-wider font-medium">Persistência da Onda</span>
-                  <span className="text-slate-300 tabular-nums">{Math.round(config.damping * 1000) / 10}%</span>
+                  <span className="text-slate-500 uppercase tracking-wider font-medium">
+                    Persistência da Onda
+                  </span>
+                  <span className="text-slate-300 tabular-nums">
+                    {Math.round(config.damping * 1000) / 10}%
+                  </span>
                 </div>
                 <input
                   id="range-wave-damping"
@@ -186,13 +216,17 @@ export const PondControls: React.FC<PondControlsProps> = ({
                   aria-label="Persistência da onda, controla quanto tempo as ondas permanecem"
                   aria-describedby="wave-damping-description"
                 />
-                <span id="wave-damping-description" className="text-[10px] text-slate-400">Maior valor mantém as ondas por mais tempo.</span>
+                <span id="wave-damping-description" className="text-[10px] text-slate-400">
+                  Maior valor mantém as ondas por mais tempo.
+                </span>
               </div>
 
               {/* Intensidade de Refração */}
               <div className="flex flex-col gap-2 col-span-2 sm:col-span-3">
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-slate-500 uppercase tracking-wider font-medium">Refração da Água</span>
+                  <span className="text-slate-500 uppercase tracking-wider font-medium">
+                    Refração da Água
+                  </span>
                   <span className="text-slate-300 tabular-nums">
                     {Math.round(config.refractionStrength * 1000) / 10}
                   </span>
@@ -212,24 +246,63 @@ export const PondControls: React.FC<PondControlsProps> = ({
                   aria-label="Refração da água, controla a distorção visual do leito"
                   aria-describedby="refraction-description"
                 />
-                <span id="refraction-description" className="text-[10px] text-slate-400">Ajusta quanto o leito se distorce com as ondas.</span>
+                <span id="refraction-description" className="text-[10px] text-slate-400">
+                  Ajusta quanto o leito se distorce com as ondas.
+                </span>
               </div>
 
               <div className="col-span-2 sm:col-span-3 flex flex-col gap-2">
-                <label htmlFor="quality-profile" className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">Qualidade visual</label>
+                <label
+                  htmlFor="pond-environment"
+                  className="text-slate-500 font-medium uppercase tracking-wider text-[10px]"
+                >
+                  Ambiente
+                </label>
+                <select
+                  id="pond-environment"
+                  value={config.environment}
+                  onChange={(event) =>
+                    onChangeConfig((prev) => ({
+                      ...prev,
+                      environment: event.target.value as PondEnvironment,
+                    }))
+                  }
+                  className="min-h-11 rounded-lg border border-slate-700/70 bg-slate-900 px-3 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                >
+                  <option value="japanese_garden">Jardim japonês — carpas e pedras</option>
+                  <option value="mountain_spring">Nascente montanhosa — água fria</option>
+                  <option value="tropical_lagoon">Lagoa tropical — areia e tons turquesa</option>
+                  <option value="moonlit_marsh">Brejo ao luar — rochas escuras</option>
+                </select>
+                <span className="text-[10px] text-slate-400">
+                  Muda o leito procedimental sem reiniciar a experiência.
+                </span>
+              </div>
+
+              <div className="col-span-2 sm:col-span-3 flex flex-col gap-2">
+                <label
+                  htmlFor="quality-profile"
+                  className="text-slate-500 font-medium uppercase tracking-wider text-[10px]"
+                >
+                  Qualidade visual
+                </label>
                 <select
                   id="quality-profile"
                   value={config.quality}
-                  onChange={(event) => onChangeConfig((prev) => ({ ...prev, quality: event.target.value as QualityProfile }))}
+                  onChange={(event) =>
+                    onChangeConfig((prev) => ({ ...prev, quality: event.target.value as QualityMode }))
+                  }
                   className="min-h-11 rounded-lg border border-slate-700/70 bg-slate-900 px-3 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
                 >
+                  <option value="auto">Automática — recomendada</option>
                   <option value="economy">Economia — melhor desempenho</option>
                   <option value="balanced">Balanceada — recomendada</option>
                   <option value="immersive">Imersiva — mais detalhes</option>
                 </select>
-                <span className="text-[10px] text-slate-400">Define a resolução da simulação e a frequência das texturas.</span>
+                <span className="text-[10px] text-slate-400">
+                  Define a resolução da simulação e a frequência das texturas.
+                </span>
               </div>
-
             </div>
           </div>
         )}
@@ -237,11 +310,10 @@ export const PondControls: React.FC<PondControlsProps> = ({
         {/* ── Primary Floating Dock ──────────────────────────────────── */}
         <div
           id="dock-primary-controls"
-        className="flex max-w-full items-center gap-1 overflow-x-auto sm:gap-1.5 bg-slate-950/92 backdrop-blur-xl
+          className="flex max-w-full items-center gap-1 overflow-x-auto sm:gap-1.5 bg-slate-950/92 backdrop-blur-xl
             border border-slate-700/70 p-1.5 rounded-full shadow-2xl text-slate-200
             ring-1 ring-inset ring-white/5"
         >
-
           {/* Mode: Ondular */}
           <Tip label="Ondular — arraste para criar ondas">
             <button
@@ -336,10 +408,16 @@ export const PondControls: React.FC<PondControlsProps> = ({
             >
               <CloudRain className="w-3.5 h-3.5" />
               {config.rainIntensity === 'medium' && (
-                <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400" aria-hidden="true" />
+                <span
+                  className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400"
+                  aria-hidden="true"
+                />
               )}
               {config.rainIntensity === 'light' && (
-                <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-300/60" aria-hidden="true" />
+                <span
+                  className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-300/60"
+                  aria-hidden="true"
+                />
               )}
             </button>
           </Tip>
@@ -360,12 +438,19 @@ export const PondControls: React.FC<PondControlsProps> = ({
                   : 'hover:bg-slate-800/70 text-slate-500 hover:text-slate-300'
               }`}
             >
-              {config.soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              {config.soundEnabled ? (
+                <Volume2 className="w-3.5 h-3.5" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5" />
+              )}
             </button>
           </Tip>
 
           {!audioStatus.available && (
-            <span className="hidden max-w-32 truncate px-1 text-[10px] text-amber-200 sm:inline" role="status">
+            <span
+              className="hidden max-w-32 truncate px-1 text-[10px] text-amber-200 sm:inline"
+              role="status"
+            >
               Áudio indisponível
             </span>
           )}
@@ -397,12 +482,9 @@ export const PondControls: React.FC<PondControlsProps> = ({
                   : 'hover:bg-slate-800/70 text-slate-500 hover:text-slate-300'
               }`}
             >
-              {isExpanded
-                ? <ChevronDown className="w-3.5 h-3.5" />
-                : <ChevronUp className="w-3.5 h-3.5" />}
+              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
             </button>
           </Tip>
-
         </div>
       </div>
     </div>

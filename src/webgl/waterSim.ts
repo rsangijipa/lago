@@ -1,6 +1,7 @@
 import {
   quadVertexShader,
   dropFragmentShader,
+  windFragmentShader,
   updateFragmentShader,
   compositeFragmentShader,
 } from './shaders';
@@ -11,15 +12,20 @@ export interface TexturePair {
   fbo: WebGLFramebuffer;
 }
 
-export interface AmbientConfig { lightDir: [number, number, number]; waterTint: [number, number, number]; ambientCode: number; }
+export interface AmbientConfig {
+  lightDir: [number, number, number];
+  waterTint: [number, number, number];
+  ambientCode: number;
+}
 
 export class WebGLWaterSimulation {
-  private gl: WebGLRenderingContext | WebGL2RenderingContext;
+  private gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
-  public readonly simResolution: number;
+  private _simResolution: number;
 
   // Shader programs
   private dropProgram!: WebGLProgram;
+  private windProgram!: WebGLProgram;
   private updateProgram!: WebGLProgram;
   private compositeProgram!: WebGLProgram;
 
@@ -32,6 +38,7 @@ export class WebGLWaterSimulation {
   private quadBuffer!: WebGLBuffer;
 
   // Scene textures
+  private riverbedTexture!: WebGLTexture;
   private underwaterTexture!: WebGLTexture;
   private skyTexture!: WebGLTexture;
   private floatingTexture!: WebGLTexture;
@@ -44,15 +51,13 @@ export class WebGLWaterSimulation {
 
   constructor(canvas: HTMLCanvasElement, simResolution = 512) {
     this.canvas = canvas;
-    const gl =
-      canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false }) ||
-      canvas.getContext('webgl', { alpha: false, antialias: false, depth: false });
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false });
 
     if (!gl) {
-      throw new Error('WebGL is not supported in this browser.');
+      throw new Error('WebGL2 é obrigatório para esta experiência.');
     }
-    this.gl = gl as WebGLRenderingContext;
-    this.simResolution = simResolution;
+    this.gl = gl;
+    this._simResolution = simResolution;
 
     this.initExtensionsAndFormats();
     this.initBuffers();
@@ -63,51 +68,17 @@ export class WebGLWaterSimulation {
 
   private initExtensionsAndFormats() {
     const gl = this.gl;
-    const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
-
-    let hasFloatFBO = false;
-
-    if (isWebGL2) {
-      const gl2 = gl as WebGL2RenderingContext;
-      const ext = gl2.getExtension('EXT_color_buffer_float');
-      gl2.getExtension('OES_texture_float_linear');
-
-      if (ext) {
-        this.internalFormat = gl2.RGBA16F;
-        this.format = gl2.RGBA;
-        this.texType = gl2.HALF_FLOAT;
-        hasFloatFBO = true;
-      }
+    if (!gl.getExtension('EXT_color_buffer_float')) {
+      throw new Error('WebGL2 sem suporte a render targets de ponto flutuante.');
     }
+    gl.getExtension('OES_texture_float_linear');
+    this.internalFormat = gl.RGBA16F;
+    this.format = gl.RGBA;
+    this.texType = gl.HALF_FLOAT;
+  }
 
-    if (!hasFloatFBO) {
-      const halfFloatExt = gl.getExtension('OES_texture_half_float');
-      gl.getExtension('OES_texture_half_float_linear');
-      if (halfFloatExt) {
-        this.internalFormat = gl.RGBA;
-        this.format = gl.RGBA;
-        this.texType = halfFloatExt.HALF_FLOAT_OES;
-        hasFloatFBO = true;
-      }
-    }
-
-    if (!hasFloatFBO) {
-      const floatExt = gl.getExtension('OES_texture_float');
-      gl.getExtension('OES_texture_float_linear');
-      if (floatExt) {
-        this.internalFormat = gl.RGBA;
-        this.format = gl.RGBA;
-        this.texType = gl.FLOAT;
-        hasFloatFBO = true;
-      }
-    }
-
-    if (!hasFloatFBO) {
-      // Fallback to standard 8-bit unsigned byte
-      this.internalFormat = gl.RGBA;
-      this.format = gl.RGBA;
-      this.texType = gl.UNSIGNED_BYTE;
-    }
+  public get simResolution(): number {
+    return this._simResolution;
   }
 
   private createShader(type: number, source: string): WebGLShader {
@@ -143,6 +114,7 @@ export class WebGLWaterSimulation {
 
   private initShaders() {
     this.dropProgram = this.createProgram(quadVertexShader, dropFragmentShader);
+    this.windProgram = this.createProgram(quadVertexShader, windFragmentShader);
     this.updateProgram = this.createProgram(quadVertexShader, updateFragmentShader);
     this.compositeProgram = this.createProgram(quadVertexShader, compositeFragmentShader);
   }
@@ -152,14 +124,7 @@ export class WebGLWaterSimulation {
     this.quadBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
     // Two triangles covering [-1, 1] clip space
-    const vertices = new Float32Array([
-      -1, -1,
-       1, -1,
-      -1,  1,
-      -1,  1,
-       1, -1,
-       1,  1,
-    ]);
+    const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
   }
 
@@ -176,12 +141,12 @@ export class WebGLWaterSimulation {
       gl.TEXTURE_2D,
       0,
       this.internalFormat,
-      this.simResolution,
-      this.simResolution,
+      this._simResolution,
+      this._simResolution,
       0,
       this.format,
       this.texType,
-      null
+      null,
     );
 
     const fbo = gl.createFramebuffer()!;
@@ -190,22 +155,9 @@ export class WebGLWaterSimulation {
 
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      console.warn('FBO status incomplete with current format, attempting unsigned byte fallback.');
-      // Fallback to unsigned byte
-      this.internalFormat = gl.RGBA;
-      this.format = gl.RGBA;
-      this.texType = gl.UNSIGNED_BYTE;
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        this.simResolution,
-        this.simResolution,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null
-      );
+      gl.deleteFramebuffer(fbo);
+      gl.deleteTexture(tex);
+      throw new Error('Não foi possível criar o framebuffer WebGL2 de ponto flutuante.');
     }
 
     // Clear to 0
@@ -222,6 +174,18 @@ export class WebGLWaterSimulation {
     this.currentReadFboIndex = 0;
   }
 
+  public setResolution(resolution: number) {
+    const next = Math.max(128, Math.floor(resolution));
+    if (this.disposed || next === this._simResolution) return;
+    const gl = this.gl;
+    gl.deleteTexture(this.fboA.texture);
+    gl.deleteFramebuffer(this.fboA.fbo);
+    gl.deleteTexture(this.fboB.texture);
+    gl.deleteFramebuffer(this.fboB.fbo);
+    this._simResolution = next;
+    this.initFramebuffers();
+  }
+
   private initStaticTextures() {
     const gl = this.gl;
     const createEmptyTex = () => {
@@ -234,9 +198,17 @@ export class WebGLWaterSimulation {
       return tex;
     };
 
+    this.riverbedTexture = createEmptyTex();
     this.underwaterTexture = createEmptyTex();
     this.skyTexture = createEmptyTex();
     this.floatingTexture = createEmptyTex();
+  }
+
+  public updateRiverbedTexture(source: HTMLCanvasElement | HTMLImageElement) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.riverbedTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
   }
 
   public updateUnderwaterTexture(source: HTMLCanvasElement | HTMLImageElement) {
@@ -307,7 +279,7 @@ export class WebGLWaterSimulation {
 
     gl.useProgram(this.dropProgram);
     gl.bindFramebuffer(gl.FRAMEBUFFER, write.fbo);
-    gl.viewport(0, 0, this.simResolution, this.simResolution);
+    gl.viewport(0, 0, this._simResolution, this._simResolution);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
@@ -325,6 +297,25 @@ export class WebGLWaterSimulation {
     this.swapFBO();
   }
 
+  public applyWind(timeSeconds: number, strength = 0.003) {
+    if (this.disposed) return;
+    const gl = this.gl;
+    const read = this.getReadFBO();
+    const write = this.getWriteFBO();
+    gl.useProgram(this.windProgram);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, write.fbo);
+    gl.viewport(0, 0, this._simResolution, this._simResolution);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, read.texture);
+    gl.uniform1i(this.getUniform(this.windProgram, 'u_texture'), 0);
+    gl.uniform1f(this.getUniform(this.windProgram, 'u_time'), timeSeconds);
+    gl.uniform1f(this.getUniform(this.windProgram, 'u_strength'), strength);
+    this.bindQuad(this.windProgram);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.swapFBO();
+  }
+
   /**
    * Propagates water wave equation one simulation step
    */
@@ -336,13 +327,13 @@ export class WebGLWaterSimulation {
 
     gl.useProgram(this.updateProgram);
     gl.bindFramebuffer(gl.FRAMEBUFFER, write.fbo);
-    gl.viewport(0, 0, this.simResolution, this.simResolution);
+    gl.viewport(0, 0, this._simResolution, this._simResolution);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
     gl.uniform1i(this.getUniform(this.updateProgram, 'u_texture'), 0);
 
-    const delta = 1.0 / this.simResolution;
+    const delta = 1.0 / this._simResolution;
     gl.uniform2f(gl.getUniformLocation(this.updateProgram, 'u_delta'), delta, delta);
     gl.uniform1f(gl.getUniformLocation(this.updateProgram, 'u_damping'), damping);
 
@@ -379,7 +370,7 @@ export class WebGLWaterSimulation {
     ambient: AmbientLighting = 'day',
     refractionStrength = 0.032,
     sunlightIntensity = 0.85,
-    causticsIntensity = 0.75
+    causticsIntensity = 0.75,
   ) {
     if (this.disposed) return;
     const gl = this.gl;
@@ -394,46 +385,57 @@ export class WebGLWaterSimulation {
     gl.bindTexture(gl.TEXTURE_2D, read.texture);
     gl.uniform1i(this.getUniform(this.compositeProgram, 'u_water'), 0);
 
-    // Texture Unit 1: Underwater World
+    // Texture Unit 1: Static riverbed
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.underwaterTexture);
-    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_underwater'), 1);
+    gl.bindTexture(gl.TEXTURE_2D, this.riverbedTexture);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_riverbed'), 1);
 
-    // Texture Unit 2: Sky Reflection
+    // Texture Unit 2: Dynamic underwater entities
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
-    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_sky'), 2);
+    gl.bindTexture(gl.TEXTURE_2D, this.underwaterTexture);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_underwater'), 2);
 
-    // Texture Unit 3: Floating Elements
+    // Texture Unit 3: Sky Reflection
     gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, this.floatingTexture);
-    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_floating'), 3);
+    gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_sky'), 3);
 
-    const delta = 1.0 / this.simResolution;
+    // Texture Unit 4: Floating Elements
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.floatingTexture);
+    gl.uniform1i(this.getUniform(this.compositeProgram, 'u_floating'), 4);
+
+    const delta = 1.0 / this._simResolution;
     gl.uniform2f(gl.getUniformLocation(this.compositeProgram, 'u_delta'), delta, delta);
     gl.uniform1f(this.getUniform(this.compositeProgram, 'u_refraction'), refractionStrength);
     gl.uniform1f(this.getUniform(this.compositeProgram, 'u_specular'), sunlightIntensity);
     gl.uniform1f(this.getUniform(this.compositeProgram, 'u_caustics'), causticsIntensity);
+    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_time'), performance.now() / 1000);
 
     // Ambient Lighting & Water Tint
     let lightDir = [0.4, 0.7, 0.6];
     let waterTint = [0.08, 0.28, 0.24]; // Lush mountain lake emerald
-    let ambientCode = 0.0;
 
     if (ambient === 'sunset') {
       lightDir = [-0.6, 0.3, 0.4];
       waterTint = [0.26, 0.16, 0.22];
-      ambientCode = 1.0;
     } else if (ambient === 'night') {
       lightDir = [0.2, 0.8, 0.5];
       waterTint = [0.03, 0.08, 0.16]; // Deep midnight sapphire
-      ambientCode = 2.0;
     }
 
-    gl.uniform3f(gl.getUniformLocation(this.compositeProgram, 'u_lightDir'), lightDir[0], lightDir[1], lightDir[2]);
-    gl.uniform3f(gl.getUniformLocation(this.compositeProgram, 'u_waterTint'), waterTint[0], waterTint[1], waterTint[2]);
-    gl.uniform1f(this.getUniform(this.compositeProgram, 'u_ambientMode'), ambientCode);
-
+    gl.uniform3f(
+      gl.getUniformLocation(this.compositeProgram, 'u_lightDir'),
+      lightDir[0],
+      lightDir[1],
+      lightDir[2],
+    );
+    gl.uniform3f(
+      gl.getUniformLocation(this.compositeProgram, 'u_waterTint'),
+      waterTint[0],
+      waterTint[1],
+      waterTint[2],
+    );
     this.bindQuad(this.compositeProgram);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
@@ -447,6 +449,7 @@ export class WebGLWaterSimulation {
 
     const gl = this.gl;
     gl.deleteProgram(this.dropProgram);
+    gl.deleteProgram(this.windProgram);
     gl.deleteProgram(this.updateProgram);
     gl.deleteProgram(this.compositeProgram);
     gl.deleteBuffer(this.quadBuffer);
@@ -455,6 +458,7 @@ export class WebGLWaterSimulation {
     gl.deleteFramebuffer(this.fboA.fbo);
     gl.deleteTexture(this.fboB.texture);
     gl.deleteFramebuffer(this.fboB.fbo);
+    gl.deleteTexture(this.riverbedTexture);
     gl.deleteTexture(this.underwaterTexture);
     gl.deleteTexture(this.skyTexture);
     gl.deleteTexture(this.floatingTexture);

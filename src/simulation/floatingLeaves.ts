@@ -9,16 +9,16 @@ export function createFloatingLeaves(width: number, height: number): FloatingLea
     const types: FloatingLeaf['type'][] = ['lily_pad', 'pink_lotus', 'lily_pad', 'white_lotus', 'lily_pad'];
     leaves.push({
       id: i,
-      x: (width * 0.15) + (i / lilyCount) * (width * 0.7) + (Math.random() - 0.5) * 60,
-      y: (height * 0.2) + Math.random() * (height * 0.6),
+      x: width * 0.15 + (i / lilyCount) * (width * 0.7) + (Math.random() - 0.5) * 60,
+      y: height * 0.2 + Math.random() * (height * 0.6),
       targetX: 0,
       targetY: 0,
       radius: 38 + Math.random() * 24,
       angle: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 0.002,
+      rotationSpeed: (Math.random() - 0.5) * 0.12,
       type: types[i % types.length],
-      driftSpeedX: (Math.random() - 0.5) * 0.15,
-      driftSpeedY: (Math.random() - 0.5) * 0.15,
+      driftSpeedX: (Math.random() - 0.5) * 9,
+      driftSpeedY: (Math.random() - 0.5) * 9,
       swayOffset: Math.random() * Math.PI * 2,
     });
   }
@@ -34,10 +34,10 @@ export function createFloatingLeaves(width: number, height: number): FloatingLea
       targetY: 0,
       radius: 12 + Math.random() * 10,
       angle: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 0.008,
+      rotationSpeed: (Math.random() - 0.5) * 0.48,
       type: Math.random() > 0.4 ? 'cherry_petal' : 'autumn_leaf',
-      driftSpeedX: 0.1 + Math.random() * 0.25,
-      driftSpeedY: 0.05 + Math.random() * 0.15,
+      driftSpeedX: 6 + Math.random() * 15,
+      driftSpeedY: 3 + Math.random() * 9,
       swayOffset: Math.random() * Math.PI * 2,
     });
   }
@@ -50,13 +50,14 @@ export function updateFloatingLeaves(
   width: number,
   height: number,
   ripples: { x: number; y: number; strength: number }[],
-  time: number
+  _time: number,
+  dtSeconds: number,
 ) {
   for (const leaf of leaves) {
     // Gentle natural drift
-    leaf.x += leaf.driftSpeedX;
-    leaf.y += leaf.driftSpeedY;
-    leaf.angle += leaf.rotationSpeed;
+    leaf.x += leaf.driftSpeedX * dtSeconds;
+    leaf.y += leaf.driftSpeedY * dtSeconds;
+    leaf.angle += leaf.rotationSpeed * dtSeconds;
 
     // React to ripples passing by: push leaf gently along wave gradient
     for (const rip of ripples) {
@@ -65,9 +66,10 @@ export function updateFloatingLeaves(
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 120 && dist > 5) {
         const force = (rip.strength * 2.5) / (dist * 0.1 + 1);
-        leaf.x += (dx / dist) * force;
-        leaf.y += (dy / dist) * force;
-        leaf.angle += (Math.random() - 0.5) * 0.02;
+        const frameScale = dtSeconds * 60;
+        leaf.x += (dx / dist) * force * frameScale;
+        leaf.y += (dy / dist) * force * frameScale;
+        leaf.angle += (Math.random() - 0.5) * 0.02 * frameScale;
       }
     }
 
@@ -80,11 +82,7 @@ export function updateFloatingLeaves(
   }
 }
 
-export function renderLeavesOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  leaves: FloatingLeaf[],
-  time: number
-) {
+export function renderLeavesOnCanvas(ctx: CanvasRenderingContext2D, leaves: FloatingLeaf[], time: number) {
   for (const leaf of leaves) {
     ctx.save();
     // Wave bobbing translation
@@ -92,37 +90,44 @@ export function renderLeavesOnCanvas(
     const currentX = leaf.x;
     const currentY = leaf.y + bob;
 
-    // 1. Drop shadow onto the riverbed below
-    ctx.save();
-    ctx.translate(currentX + 16, currentY + 22);
-    ctx.rotate(leaf.angle);
-    ctx.beginPath();
-    ctx.arc(0, 0, leaf.radius, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(10, 18, 14, 0.4)';
-    ctx.filter = 'blur(8px)';
-    ctx.fill();
-    ctx.restore();
-
-    // 2. Draw Leaf / Lotus Pad
     ctx.translate(currentX, currentY);
     ctx.rotate(leaf.angle);
-
-    if (leaf.type === 'lily_pad' || leaf.type === 'pink_lotus' || leaf.type === 'white_lotus') {
-      drawLilyPad(ctx, leaf.radius);
-
-      if (leaf.type === 'pink_lotus') {
-        drawLotusFlower(ctx, leaf.radius * 0.65, '#f078a6', '#fff0f5');
-      } else if (leaf.type === 'white_lotus') {
-        drawLotusFlower(ctx, leaf.radius * 0.65, '#fff', '#eef9ff');
-      }
-    } else if (leaf.type === 'cherry_petal') {
-      drawCherryPetal(ctx, leaf.radius);
-    } else if (leaf.type === 'autumn_leaf') {
-      drawAutumnLeaf(ctx, leaf.radius);
-    }
-
+    const sprite = getLeafSprite(leaf);
+    ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
     ctx.restore();
   }
+}
+
+const leafSpriteCache = new Map<string, HTMLCanvasElement>();
+
+function getLeafSprite(leaf: FloatingLeaf): HTMLCanvasElement {
+  const radius = Math.max(4, Math.round(leaf.radius / 2) * 2);
+  const key = `${leaf.type}:${radius}`;
+  const cached = leafSpriteCache.get(key);
+  if (cached) return cached;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.ceil(radius * 4.5);
+  const ctx = canvas.getContext('2d')!;
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.save();
+  ctx.translate(10, 14);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10, 18, 14, 0.35)';
+  ctx.filter = 'blur(7px)';
+  ctx.fill();
+  ctx.restore();
+  if (leaf.type === 'lily_pad' || leaf.type === 'pink_lotus' || leaf.type === 'white_lotus') {
+    drawLilyPad(ctx, radius);
+    if (leaf.type === 'pink_lotus') drawLotusFlower(ctx, radius * 0.65, '#f078a6', '#fff0f5');
+    if (leaf.type === 'white_lotus') drawLotusFlower(ctx, radius * 0.65, '#fff', '#eef9ff');
+  } else if (leaf.type === 'cherry_petal') {
+    drawCherryPetal(ctx, radius);
+  } else {
+    drawAutumnLeaf(ctx, radius);
+  }
+  leafSpriteCache.set(key, canvas);
+  return canvas;
 }
 
 function drawLilyPad(ctx: CanvasRenderingContext2D, r: number) {
@@ -175,7 +180,7 @@ function drawLotusFlower(
   ctx: CanvasRenderingContext2D,
   size: number,
   primaryColor: string,
-  tipColor: string
+  tipColor: string,
 ) {
   const petals = 8;
   ctx.save();
@@ -207,7 +212,7 @@ function drawSinglePetal(
   length: number,
   width: number,
   baseCol: string,
-  tipCol: string
+  tipCol: string,
 ) {
   ctx.beginPath();
   ctx.moveTo(0, 0);

@@ -5,6 +5,16 @@ interface LoadingScreenProps {
   onComplete?: () => void;
 }
 
+const STEPS = [
+  { threshold: 0, label: 'Inicializando WebGL…' },
+  { threshold: 18, label: 'Gerando leito do lago…' },
+  { threshold: 38, label: 'Compilando shaders de água…' },
+  { threshold: 55, label: 'Animando carpas koi…' },
+  { threshold: 72, label: 'Espalhando nenúfares…' },
+  { threshold: 88, label: 'Sintonizando o áudio…' },
+  { threshold: 98, label: 'Quase lá…' },
+];
+
 /**
  * Full-screen animated loading screen for the Lago WebGL simulation.
  * Shows an animated pond surface built purely with SVG + CSS, a progress bar,
@@ -15,20 +25,9 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, onComple
   const [statusIndex, setStatusIndex] = useState(0);
   const prevProgress = useRef(0);
 
-  const steps = [
-    { threshold: 0,  label: 'Inicializando WebGL…' },
-    { threshold: 18, label: 'Gerando leito do lago…' },
-    { threshold: 38, label: 'Compilando shaders de água…' },
-    { threshold: 55, label: 'Animando carpas koi…' },
-    { threshold: 72, label: 'Espalhando nenúfares…' },
-    { threshold: 88, label: 'Sintonizando o áudio…' },
-    { threshold: 98, label: 'Quase lá…' },
-  ];
-
   // Advance status message based on progress
   useEffect(() => {
-    const next = steps.reduceRight((acc, s, i) =>
-      progress >= s.threshold ? i : acc, 0);
+    const next = STEPS.reduceRight((acc, s, i) => (progress >= s.threshold ? i : acc), 0);
     setStatusIndex(next);
     prevProgress.current = progress;
   }, [progress]);
@@ -114,9 +113,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, onComple
       </div>
 
       {/* Brand */}
-      <h1 className="font-serif text-4xl tracking-widest text-slate-100 mb-1 select-none">
-        Lago
-      </h1>
+      <h1 className="font-serif text-4xl tracking-widest text-slate-100 mb-1 select-none">Lago</h1>
       <p className="text-slate-500 text-xs tracking-[0.25em] uppercase mb-10 select-none">
         simulação interativa
       </p>
@@ -138,7 +135,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ progress, onComple
 
         <div className="flex items-center justify-between">
           <span className="text-slate-400 text-[10px] tracking-wider animate-pulse">
-            {steps[statusIndex]?.label}
+            {STEPS[statusIndex]?.label}
           </span>
           <span className="text-slate-600 text-[10px] tabular-nums">
             {Math.min(100, Math.round(progress))}%
